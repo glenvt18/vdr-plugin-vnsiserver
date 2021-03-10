@@ -47,6 +47,37 @@
 #include <vdr/channels.h>
 #include <vdr/eitscan.h>
 
+static void printTime(const char *msg, time_t t)
+{
+    char tstr[100];
+    struct tm tmp;
+
+    localtime_r(&t, &tmp);
+    strftime(tstr, sizeof(tstr), "%Y-%d/%m %H:%M:%S", &tmp);
+
+    INFOLOG("=== %s: %s", msg, tstr);
+}
+
+static void printDTS(const char *msg, int64_t dts)
+{
+    int64_t sec = dts / 1000000;
+    int usec = dts % 1000000;
+    char overflow = ' ';
+
+    if (sec > int64_t(UINT_MAX))
+        overflow = '*';
+
+    time_t t = (uint64_t)sec;
+
+    char tstr[100];
+    struct tm tmp;
+
+    localtime_r(&t, &tmp);
+    strftime(tstr, sizeof(tstr), "%Y-%d/%m %H:%M:%S", &tmp);
+
+    INFOLOG("=== %s:%c%s %d us", msg, overflow, tstr, usec);
+}
+
 // --- cLiveStreamer -------------------------------------------------
 
 cLiveStreamer::cLiveStreamer(int clientID, bool bAllowRDS, int protocol, uint8_t timeshift, uint32_t timeout)
@@ -231,6 +262,9 @@ void cLiveStreamer::Action(void)
         requestStreamChangeData = false;
         if (pkt_data.reftime)
         {
+          INFOLOG("=== have pkt_data.reftime");
+          printTime("pkt_data.reftime", pkt_data.reftime);
+          printDTS("pkt_data.dts", pkt_data.dts);
           m_refTime = pkt_data.reftime;
           m_refDTS = pkt_data.dts;
           m_curDTS = (int64_t)m_refTime * DVD_TIME_BASE;
@@ -246,6 +280,9 @@ void cLiveStreamer::Action(void)
         m_curDTS = (pkt_data.dts - m_refDTS) + (int64_t)m_refTime * DVD_TIME_BASE;
         if (bufferStatsTimer.TimedOut())
         {
+          INFOLOG("=== timeout");
+          printTime("pkt_data.reftime", pkt_data.reftime);
+          printDTS("pkt_data.dts", pkt_data.dts);
           sendStreamTimes();
           bufferStatsTimer.Set(1000);
         }
@@ -841,11 +878,17 @@ void cLiveStreamer::sendStreamTimes()
   if (m_Channel == NULL)
     return;
 
+  INFOLOG("=== sendStreamTimes() ==============================");
+
   cResponsePacket resp;
   resp.initStream(VNSI_STREAM_TIMES, 0, 0, 0, 0, 0);
 
   time_t starttime = m_refTime;
   int64_t refDTS = m_refDTS;
+
+  printTime("starttime", starttime);
+  printDTS("refDTS", refDTS);
+  printDTS("curDTS", m_curDTS);
 
   {
 #if VDRVERSNUM >= 20301
@@ -863,8 +906,12 @@ void cLiveStreamer::sendStreamTimes()
     const cEvent *event = schedule->GetEventAround(m_curDTS / DVD_TIME_BASE);
     if (event)
     {
+      INFOLOG("=== have event");
       starttime = event->StartTime();
       refDTS = int64_t(difftime(starttime, m_refTime) * DVD_TIME_BASE) + m_refDTS;
+
+      printTime("starttime", starttime);
+      printDTS("refDTS", refDTS);
     }
   }
   uint32_t start, end;
@@ -877,6 +924,13 @@ void cLiveStreamer::sendStreamTimes()
     mintime = int64_t(difftime((time_t)start, starttime) * DVD_TIME_BASE) + refDTS;
     maxtime = int64_t(difftime((time_t)end, starttime) * DVD_TIME_BASE) + refDTS;
   }
+
+  INFOLOG("=== SEND:");
+  INFOLOG("===     timeshift: %d", timeshift);
+  printTime("    starttime", starttime);
+  printDTS( "    refDTS", refDTS);
+  printDTS( "    mintime", mintime);
+  printDTS( "    maxtime", maxtime);
 
   resp.add_U8(timeshift);
   resp.add_U32(starttime);
@@ -938,5 +992,6 @@ void cLiveStreamer::AddStatusSocket(int fd)
 
 void cLiveStreamer::SendStatus()
 {
+  INFOLOG("=== SendStatus()");
   sendStreamTimes();
 }
